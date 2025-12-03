@@ -20,6 +20,7 @@ exchange_instances = [
     ccxt.bitget(),  # 放在第二个
     ccxt.gateio(),
     ccxt.mexc(),
+    ccxt.htx(),
     ccxt.kucoin()
 ]
 
