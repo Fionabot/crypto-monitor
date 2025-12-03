@@ -14,12 +14,12 @@ ALERT_THRESHOLD = 2000
 
 app = Flask(__name__)
 
-# 定义要查询的交易所（选取了常上小币种的交易所）
+# 定义要查询的交易所（排在前面的会优先显示）
 exchange_instances = [
+    ccxt.bybit(),   # 放在第一个
+    ccxt.bitget(),  # 放在第二个
     ccxt.gateio(),
     ccxt.mexc(),
-    ccxt.bitget(),
-    ccxt.bybit(),  
     ccxt.kucoin()
 ]
 
