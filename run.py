@@ -27,7 +27,7 @@ exchange_instances = [
     ccxt.htx(common_config)
 ]
 
-# 网页前端代码
+# 网页前端代码 (注意：这里开始长字符串)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh">
@@ -39,16 +39,11 @@ HTML_TEMPLATE = """
     <style>
         body { background-color: #f4f6f9; font-family: 'Segoe UI', Roboto, sans-serif; padding: 20px; }
         .card { border: none; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 30px; overflow: hidden; }
-        
-        /* 标题栏更简洁 */
         .card-header { background: #2c3e50; color: #fff; padding: 15px 20px; font-weight: 600; font-size: 1.1rem; }
-        
-        /* 底部汇总栏样式 */
         .card-footer { background-color: #f8f9fa; border-top: 1px solid #eee; padding: 15px; }
         .total-stat-box { font-size: 1rem; font-weight: bold; padding: 5px 15px; border-radius: 6px; }
         .total-bid { color: #2e7d32; background: #e8f5e9; border: 1px solid #c8e6c9; }
         .total-ask { color: #c62828; background: #ffebee; border: 1px solid #ffcdd2; }
-
         .depth-danger { background-color: #ffebee !important; color: #c62828; font-weight: bold; }
         .depth-good { color: #2e7d32; }
         .spread-high { color: #d32f2f; font-weight: bold; }
@@ -94,7 +89,6 @@ HTML_TEMPLATE = """
             pairs.forEach(pair => {
                 let pairRows = data.filter(d => d.symbol === pair);
                 
-                // 计算总和
                 let totalBid = 0;
                 let totalAsk = 0;
                 pairRows.forEach(r => {
@@ -106,16 +100,12 @@ HTML_TEMPLATE = """
                 
                 const formatNum = (num) => num > 1000000 ? (num/1000000).toFixed(2)+'M' : (num/1000).toFixed(1)+'K';
 
-                // 构建 HTML
                 let html = `
                 <div class="col-md-12">
                     <div class="card">
-                        <!-- 标题栏：只放币种名称 -->
                         <div class="card-header">
                             <span>🪙 ${pair}</span>
                         </div>
-                        
-                        <!-- 表格区域 -->
                         <div class="card-body p-0">
                             <table class="table table-striped text-center mb-0">
                                 <thead class="table-light">
@@ -151,11 +141,98 @@ HTML_TEMPLATE = """
                     }
                 });
 
-                // --- 变化在这里：添加页脚汇总区域 ---
                 html += `
                                 </tbody>
                             </table>
                         </div>
                         <div class="card-footer">
                             <div class="d-flex justify-content-around text-center">
-                                <span class="total-stat-box total-bid">📉 全网总买盘: $${f
+                                <span class="total-stat-box total-bid">📉 全网总买盘: $${formatNum(totalBid)}</span>
+                                <span class="total-stat-box total-ask">📈 全网总卖盘: $${formatNum(totalAsk)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+                
+                container.innerHTML += html;
+            });
+        }
+        updateData();
+        setInterval(updateData, 8000); 
+    </script>
+</body>
+</html>
+""" 
+# (注意：上面这个 """ 就是你刚才缺失的“下层面包”)
+
+def calculate_metrics(exchange, symbol, orderbook, ticker):
+    if not orderbook or not ticker: return 0, 0, '-'
+    price = ticker['last']
+    if not price: return 0, 0, '-'
+
+    limit_down = price * 0.98
+    limit_up = price * 1.02
+    
+    bid_sum = 0
+    for p, amount in orderbook['bids']:
+        if p >= limit_down: bid_sum += p * amount
+        else: break
+            
+    ask_sum = 0
+    for p, amount in orderbook['asks']:
+        if p <= limit_up: ask_sum += p * amount
+        else: break
+
+    spread_str = '-'
+    try:
+        best_bid = ticker['bid']
+        best_ask = ticker['ask']
+        if best_bid and best_ask and best_ask > 0:
+            spread = ((best_ask - best_bid) / best_ask) * 100
+            spread_str = "{:.2f}".format(spread)
+    except:
+        pass
+    return bid_sum, ask_sum, spread_str
+
+def fetch_one_exchange(exchange):
+    results = []
+    ex_name = exchange.id.upper()
+    try:
+        exchange.load_markets()
+    except:
+        return results
+
+    for symbol in TARGET_PAIRS:
+        item = {'exchange': ex_name, 'symbol': symbol, 'status': 'Not Listed', 'price':0, 'bid_depth':0, 'ask_depth':0, 'spread':'-'}
+        
+        if symbol in exchange.markets:
+            try:
+                ticker = exchange.fetch_ticker(symbol)
+                orderbook = exchange.fetch_order_book(symbol, limit=50)
+                bid_val, ask_val, spread_val = calculate_metrics(exchange, symbol, orderbook, ticker)
+                
+                item['price'] = ticker['last']
+                item['bid_depth'] = bid_val
+                item['ask_depth'] = ask_val
+                item['spread'] = spread_val
+                item['status'] = 'Active'
+            except Exception as e:
+                item['status'] = 'Error'
+        results.append(item)
+    return results
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE, threshold=ALERT_THRESHOLD)
+
+@app.route('/api/data')
+def get_data():
+    final_data = []
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(fetch_one_exchange, ex) for ex in exchange_instances]
+        for f in futures:
+            final_data.extend(f.result())
+    return jsonify(final_data)
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000, host='0.0.0.0')
